@@ -69,7 +69,9 @@ cameraInput.addEventListener('change', async (e) => {
 async function callGeminiAI(base64Data) {
     const prompt = "Analyze this shopping list image. Return a JSON array of objects with 'item' and 'category'. Categorize items logically in Hebrew (e.g., ירקות, מוצרי חלב, ניקיון). Only return the JSON code block.";
     
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    // עדכון שם המודל לגרסה העדכנית ביותר ב-2026
+    const modelName = "gemini-3-flash"; 
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
     
     const response = await fetch(url, {
         method: 'POST',
@@ -84,29 +86,26 @@ async function callGeminiAI(base64Data) {
         })
     });
 
-    // בדיקה אם השרת החזיר תשובה תקינה (סטטוס 200)
     if (!response.ok) {
         const errorData = await response.json();
         console.error("API Error Details:", errorData);
-        throw new Error(`השרת החזיר שגיאה (${response.status}): ${errorData.error?.message || 'לא ידוע'}`);
+        
+        // אם עדיין יש שגיאת 'Not Found', יכול להיות שצריך להשתמש בגרסת v1 במקום v1beta
+        if (response.status === 404) {
+             throw new Error("המודל לא נמצא. נסה להחליף בכתובת ה-URL את v1beta ל-v1");
+        }
+        
+        throw new Error(`שגיאת שרת (${response.status}): ${errorData.error?.message || 'לא ידוע'}`);
     }
 
     const data = await response.json();
-    
-    if (!data.candidates || !data.candidates[0]) {
-        throw new Error("ה-AI לא הצליח להפיק תשובה מהתמונה הזו.");
-    }
-
     const textResponse = data.candidates[0].content.parts[0].text;
-    console.log("🤖 תשובה גולמית מה-AI:", textResponse);
-
+    
     try {
-        // ניקוי הטקסט כדי להוציא רק את ה-JSON
         const jsonString = textResponse.replace(/```json|```/g, '').trim();
         return JSON.parse(jsonString);
     } catch (parseError) {
-        console.error("JSON Parsing Error:", textResponse);
-        throw new Error("ה-AI החזיר תשובה, אבל לא הצלחנו לקרוא אותה כרשימה.");
+        throw new Error("ה-AI החזיר תשובה בפורמט לא תקין. נסה לצלם שוב.");
     }
 }
 
