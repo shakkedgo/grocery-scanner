@@ -39,96 +39,117 @@
         const GEMINI_API_KEY = 'AIzaSyBhMujYsS9xmaDqFWQGVmJ6H0x_ye9r29I'; 
 
         const cameraInput = document.getElementById('cameraInput');
-        const loader = document.getElementById('loader');
-        const listContainer = document.getElementById('listContainer');
+const loader = document.getElementById('loader');
+const listContainer = document.getElementById('listContainer');
 
-        cameraInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+cameraInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-            showLoading(true);
-            
-            try {
-                const base64Image = await fileToBase64(file);
-                const rawData = base64Image.split(',')[1];
-                
-                const response = await callGeminiAI(rawData);
-                renderList(response);
-            } catch (error) {
-                alert("אופס, היתה שגיאה בניתוח התמונה. נסה שוב.");
-                console.error(error);
-            } finally {
-                showLoading(false);
-            }
-        });
+    console.log("📸 קובץ נבחר:", file.name, "גודל:", (file.size / 1024).toFixed(2), "KB");
+    showLoading(true);
+    
+    try {
+        const base64Image = await fileToBase64(file);
+        const rawData = base64Image.split(',')[1];
+        
+        console.log("📤 שולח בקשה ל-Gemini...");
+        const response = await callGeminiAI(rawData);
+        
+        console.log("✅ ניתוח הצליח!", response);
+        renderList(response);
+    } catch (error) {
+        console.error("❌ שגיאה בתהליך:", error);
+        alert(`שגיאה: ${error.message}`);
+    } finally {
+        showLoading(false);
+    }
+});
 
-        async function callGeminiAI(base64Data) {
-            const prompt = "Analyze this shopping list image. Return a JSON array of objects with 'item' and 'category'. Categorize items logically in Hebrew (e.g., ירקות, מוצרי חלב, ניקיון). Only return the JSON code block.";
-            
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-            
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: prompt },
-                            { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-                        ]
-                    }]
-                })
-            });
+async function callGeminiAI(base64Data) {
+    const prompt = "Analyze this shopping list image. Return a JSON array of objects with 'item' and 'category'. Categorize items logically in Hebrew (e.g., ירקות, מוצרי חלב, ניקיון). Only return the JSON code block.";
+    
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{
+                parts: [
+                    { text: prompt },
+                    { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+                ]
+            }]
+        })
+    });
 
-            const data = await response.json();
-            const textResponse = data.candidates[0].content.parts[0].text;
-            // ניקוי הטקסט כדי להוציא רק את ה-JSON
-            const jsonString = textResponse.replace(/```json|```/g, '');
-            return JSON.parse(jsonString);
-        }
+    // בדיקה אם השרת החזיר תשובה תקינה (סטטוס 200)
+    if (!response.ok) {
+        const errorData = await response.json();
+        console.error("API Error Details:", errorData);
+        throw new Error(`השרת החזיר שגיאה (${response.status}): ${errorData.error?.message || 'לא ידוע'}`);
+    }
 
-        function renderList(data) {
-            listContainer.innerHTML = '';
-            
-            // מיון לפי קטגוריות
-            const categories = {};
-            data.forEach(item => {
-                if (!categories[item.category]) categories[item.category] = [];
-                categories[item.category].push(item.item);
-            });
+    const data = await response.json();
+    
+    if (!data.candidates || !data.candidates[0]) {
+        throw new Error("ה-AI לא הצליח להפיק תשובה מהתמונה הזו.");
+    }
 
-            for (const [cat, items] of Object.entries(categories)) {
-                const card = document.createElement('div');
-                card.className = 'category-card bg-white rounded-xl shadow-md p-4 border-r-4 border-blue-500';
-                
-                let itemsHtml = items.map(item => `
-                    <div class="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0" onclick="this.classList.toggle('checked')">
-                        <input type="checkbox" class="w-5 h-5 rounded border-gray-300">
-                        <span class="text-lg text-gray-800">${item}</span>
-                    </div>
-                `).join('');
+    const textResponse = data.candidates[0].content.parts[0].text;
+    console.log("🤖 תשובה גולמית מה-AI:", textResponse);
 
-                card.innerHTML = `
-                    <h3 class="font-bold text-blue-700 mb-3 text-xl border-b-2 border-blue-100 pb-1">${cat}</h3>
-                    <div class="space-y-1">${itemsHtml}</div>
-                `;
-                listContainer.appendChild(card);
-            }
-        }
+    try {
+        // ניקוי הטקסט כדי להוציא רק את ה-JSON
+        const jsonString = textResponse.replace(/```json|```/g, '').trim();
+        return JSON.parse(jsonString);
+    } catch (parseError) {
+        console.error("JSON Parsing Error:", textResponse);
+        throw new Error("ה-AI החזיר תשובה, אבל לא הצלחנו לקרוא אותה כרשימה.");
+    }
+}
 
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = error => reject(error);
-            });
-        }
+function renderList(data) {
+    listContainer.innerHTML = '';
+    const categories = {};
+    data.forEach(item => {
+        if (!categories[item.category]) categories[item.category] = [];
+        categories[item.category].push(item.item);
+    });
 
-        function showLoading(isLoading) {
-            loader.classList.toggle('hidden', !isLoading);
-            listContainer.classList.toggle('hidden', isLoading);
-        }
+    for (const [cat, items] of Object.entries(categories)) {
+        const card = document.createElement('div');
+        card.className = 'category-card bg-white rounded-xl shadow-md p-4 border-r-4 border-blue-500 mb-4';
+        
+        let itemsHtml = items.map(item => `
+            <div class="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0" onclick="const cb = this.querySelector('input'); cb.checked = !cb.checked; this.classList.toggle('checked')">
+                <input type="checkbox" class="w-5 h-5 rounded border-gray-300">
+                <span class="text-lg text-gray-800">${item}</span>
+            </div>
+        `).join('');
+
+        card.innerHTML = `
+            <h3 class="font-bold text-blue-700 mb-3 text-xl border-b-2 border-blue-100 pb-1">${cat}</h3>
+            <div class="space-y-1">${itemsHtml}</div>
+        `;
+        listContainer.appendChild(card);
+    }
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+}
+
+function showLoading(isLoading) {
+    loader.classList.toggle('hidden', !isLoading);
+    listContainer.classList.toggle('hidden', isLoading);
+}
     </script>
 </body>
 </html>
